@@ -1,0 +1,3 @@
+sysctlTuner:
+  params: {}
+  sleep: 60
