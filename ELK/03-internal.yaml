@@ -1,0 +1,309 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: logstash-config
+  namespace: elastic-system
+data:
+  logstash.yml: |-
+    http.host: "0.0.0.0"
+    xpack.monitoring.enabled: false
+
+  logstash.conf: |-
+    input {
+      beats {
+        port => "5044"
+        ssl => true
+        ssl_certificate_authorities => ["/usr/share/logstash/config/beats-certs/ca.pem"]
+        ssl_certificate => "/usr/share/logstash/config/beats-certs/logstash.pem"
+        ssl_key => "/usr/share/logstash/config/beats-certs/logstash.key"
+        ssl_verify_mode => "force_peer"
+      }
+    }
+
+    output {
+      elasticsearch {
+        hosts => ['https://${ELASTICSEARCH_HOST}:${ELASTICSEARCH_PORT}']
+        user => "${ELASTICSEARCH_USERNAME}"
+        password => "${ELASTICSEARCH_PASSWORD}"
+        ssl => true
+        ssl_certificate_verification => true
+        index => "%{[@metadata][beat]}-%{[@metadata][version]}-%{+YYYY.MM.dd}"
+        cacert =>  "/usr/share/logstash/config/elasticsearch-certs/tls.crt"
+      }
+    }
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: filebeat-config
+  namespace: elastic-system
+data:
+  filebeat.yml: |-
+    logging.level: info
+
+    setup.dashboards.enabled: true
+
+    filebeat.modules:
+      - module: system
+        syslog:
+          enabled: true
+        auth:
+          enabled: true
+      - module: iptables
+        log:
+          enabled: true
+
+    filebeat.autodiscover:
+      providers:
+        - type: kubernetes
+          host: ${NODE_NAME}
+          hints.enabled: true
+          hints.default_config:
+            type: container
+            paths:
+              - /var/log/containers/*${data.kubernetes.container.id}.log
+
+    processors:
+      - add_cloud_metadata:
+      - add_host_metadata:
+      - add_kubernetes_metadata:
+      - add_fields:
+          target: kubernetes.cluster
+          fields:
+            name: ${CLUSTER_NAME}
+            id: ${CLUSTER_ID}
+
+    cloud.id: ${ELASTIC_CLOUD_ID}
+    cloud.auth: ${ELASTIC_CLOUD_AUTH}
+
+    output.elasticsearch:
+      hosts: ['${ELASTICSEARCH_HOST:elasticsearch}:${ELASTICSEARCH_PORT:9200}']
+      protocol: "https"
+      username: ${ELASTICSEARCH_USERNAME}
+      password: ${ELASTICSEARCH_PASSWORD}
+      ssl.certificate_authorities: ["/usr/share/filebeat/config/elasticsearch-certs/tls.crt"]
+
+    setup.kibana:
+      host: "${KIBANA_HOST:kibana}:${KIBANA_PORT:5601}"
+      protocol: "https"
+      ssl.certificate_authorities: ["/usr/share/filebeat/config/kibana-certs/tls.crt"]
+
+
+---
+kind: Deployment
+apiVersion: extensions/v1beta1
+metadata:
+  name: logstash
+  namespace: elastic-system
+spec:
+  template:
+    metadata:
+      labels:
+        app: logstash
+      annotations:
+        co.elastic.logs/module: logstash
+    spec:
+      containers:
+      - name: logstash
+        ports:
+          - containerPort: 5044
+            name: filebeat
+          - containerPort: 9600
+            name: logstash
+        image: docker.elastic.co/logstash/logstash:7.4.2
+        volumeMounts:
+        - name: logstash-config
+          mountPath: /usr/share/logstash/pipeline/logstash.conf
+          readOnly: true
+          subPath: logstash.conf
+        - name: logstash-config
+          mountPath: /usr/share/logstash/config/logstash.yml
+          readOnly: true
+          subPath: logstash.yml
+        - name: elasticsearch-certs
+          mountPath: /usr/share/logstash/config/elasticsearch-certs
+          readOnly: true
+        - name: beats-certs
+          mountPath: /usr/share/logstash/config/beats-certs
+          readOnly: true
+        command:
+        - logstash
+        env:
+        - name: ELASTICSEARCH_HOST
+          value: es-log-es-http.elastic-system.svc.cluster.local
+        - name: ELASTICSEARCH_PORT
+          value: "9200"
+        - name: ELASTICSEARCH_USERNAME
+          value: elastic
+        - name: ELASTICSEARCH_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: es-log-es-elastic-user
+              key: elastic
+      volumes:
+      - name: logstash-config
+        configMap:
+          defaultMode: 0644
+          name: logstash-config
+      - name: elasticsearch-certs
+        secret:
+          defaultMode: 420
+          optional: false
+          secretName: es-log-es-http-certs-public
+      - name: beats-certs
+        secret:
+          defaultMode: 420
+          optional: false
+          secretName: beats-certs
+
+---
+apiVersion: extensions/v1beta1
+kind: DaemonSet
+metadata:
+  name: filebeat
+  namespace: elastic-system
+spec:
+  template:
+    metadata:
+      labels:
+        app: filebeat
+    spec:
+      serviceAccountName: filebeat
+      terminationGracePeriodSeconds: 30
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      containers:
+      - name: filebeat
+        image: docker.elastic.co/beats/filebeat:7.4.2
+        args: [
+          "-c", "/etc/filebeat.yml",
+          "-e"
+        ]
+        env:
+        - name: KIBANA_HOST
+          value: es-log-kb-http.elastic-system.svc
+        - name: ELASTICSEARCH_HOST
+          value: es-log-es-http.elastic-system.svc.cluster.local
+        - name: ELASTICSEARCH_PORT
+          value: "9200"
+        - name: ELASTICSEARCH_USERNAME
+          value: elastic
+        - name: ELASTICSEARCH_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: es-log-es-elastic-user
+              key: elastic
+        - name: ELASTIC_CLOUD_ID
+          value:
+        - name: ELASTIC_CLOUD_AUTH
+          value:
+        - name: NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        - name: CLUSTER_ID
+          valueFrom:
+            configMapKeyRef:
+              name: cluster-info
+              key: cluster-id
+        - name: CLUSTER_NAME
+          valueFrom:
+            configMapKeyRef:
+              name: cluster-info
+              key: cluster-name
+        securityContext:
+          runAsUser: 0
+        resources:
+          limits:
+            memory: 200Mi
+          requests:
+            cpu: 100m
+            memory: 100Mi
+        volumeMounts:
+        - name: config
+          mountPath: /etc/filebeat.yml
+          readOnly: true
+          subPath: filebeat.yml
+        - name: data
+          mountPath: /usr/share/filebeat/data
+        - name: varlibdockercontainers
+          mountPath: /var/lib/docker/containers
+          readOnly: true
+        - name: varlog
+          mountPath: /var/log
+          readOnly: true
+        - name: elasticsearch-certs
+          mountPath: /usr/share/filebeat/config/elasticsearch-certs
+          readOnly: true          
+        - name: kibana-certs
+          mountPath: /usr/share/filebeat/config/kibana-certs
+          readOnly: true          
+      volumes:
+      - name: config
+        configMap:
+          defaultMode: 0600
+          name: filebeat-config
+      - name: varlibdockercontainers
+        hostPath:
+          path: /var/lib/docker/containers
+      - name: varlog
+        hostPath:
+          path: /var/log
+      # data folder stores a registry of read status for all files, so we don't send everything again on a Filebeat pod restart
+      - name: data
+        hostPath:
+          path: /var/lib/filebeat-data
+          type: DirectoryOrCreate
+      - name: elasticsearch-certs
+        secret:
+          defaultMode: 420
+          optional: false
+          secretName: es-log-es-http-certs-public
+      - name: kibana-certs
+        secret:
+          defaultMode: 420
+          optional: false
+          secretName: es-log-kb-http-certs-public
+
+
+---
+apiVersion: rbac.authorization.k8s.io/v1beta1
+kind: ClusterRoleBinding
+metadata:
+  name: filebeat
+subjects:
+- kind: ServiceAccount
+  name: filebeat
+  namespace: elastic-system
+roleRef:
+  kind: ClusterRole
+  name: filebeat
+  apiGroup: rbac.authorization.k8s.io
+
+---
+apiVersion: rbac.authorization.k8s.io/v1beta1
+kind: ClusterRole
+metadata:
+  name: filebeat
+  labels:
+    k8s-app: filebeat
+rules:
+- apiGroups: [""] # "" indicates the core API group
+  resources:
+  - namespaces
+  - pods
+  verbs:
+  - get
+  - watch
+  - list
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: filebeat
+  namespace: elastic-system
+  labels:
+    k8s-app: filebeat

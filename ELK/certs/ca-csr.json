@@ -1,0 +1,12 @@
+{
+  "CN": "beats-ca",
+  "key": {
+    "algo": "rsa",
+    "size": 4096
+  },
+  "names": [
+    {
+      "OU": "es-log"
+    }
+  ]
+}

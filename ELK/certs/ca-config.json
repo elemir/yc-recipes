@@ -1,0 +1,13 @@
+{
+  "signing": {
+    "default": {
+      "expiry": "85440h"
+    },
+    "profiles": {
+      "beats": {
+        "usages": ["signing", "key encipherment", "server auth", "client auth"],
+        "expiry": "85440h"
+      }
+    }
+  }
+}

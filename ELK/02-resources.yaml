@@ -1,0 +1,91 @@
+apiVersion: elasticsearch.k8s.elastic.co/v1alpha1
+kind: Elasticsearch
+metadata:
+  name: es-log
+  namespace: elastic-system
+spec:
+  version: "7.4.2"
+  updateStrategy:
+    changeBudget:
+      maxSurge: 0
+      maxUnavailable: 1
+  http:
+    tls:
+      selfSignedCertificate:
+        subjectAltNames:
+        - dns: es-log-es-http.elastic-system.svc.cluster.local
+        - dns: es-log-es-http.elastic-system.svc
+        - dns: es-log-es-http
+  nodes:
+  - name: es
+    config:
+      node.attr.attr_name: attr_value
+    podTemplate:
+      metadata:
+        annotations:
+          co.elastic.logs/module: elasticsearch
+      spec:
+        containers:
+        - name: elasticsearch
+          resources:
+            requests:
+              memory: 2Gi
+              cpu: 1
+            limits:
+              memory: 3Gi
+              cpu: 2
+          env:
+          - name: ES_JAVA_OPTS
+            value: "-Xms2g -Xmx2g"
+    nodeCount: 3
+    volumeClaimTemplates:
+    - metadata:
+        name: elasticsearch-data
+      spec:
+        accessModes:
+        - ReadWriteOnce
+        storageClassName: yc-network-ssd
+        resources:
+          requests:
+            storage: 50Gi
+
+---
+apiVersion: kibana.k8s.elastic.co/v1alpha1
+kind: Kibana
+metadata:
+  name: es-log
+  namespace: elastic-system
+spec:
+  version: 7.4.2
+  nodeCount: 1
+  elasticsearchRef:
+    name: es-log
+  podTemplate:
+    metadata:
+      annotations:
+        co.elastic.logs/module: kibana
+    spec:
+      containers:
+      - name: kibana
+  http:
+    service:
+      spec:
+        type: LoadBalancer
+
+---
+kind: Service
+apiVersion: v1
+metadata:
+  name: logstash
+  namespace: elastic-system
+spec:
+  type: LoadBalancer
+  selector:
+    app: logstash
+  ports:
+  - protocol: TCP
+    port: 5044
+    targetPort: 5044
+    name: filebeat
+
+
