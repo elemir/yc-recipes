@@ -90,6 +90,10 @@ resource "yandex_kubernetes_cluster" "elk-k8s-cluster" {
   depends_on = [
     yandex_resourcemanager_folder_iam_member.elk-k8s-editor,
   ]
+
+  timeouts {
+    create = "15m"
+  }
 }
 
 resource "yandex_kubernetes_node_group" "elk-nodes" {
