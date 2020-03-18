@@ -1,0 +1,57 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kube-proxy-wrapper-config
+  namespace: kube-system
+data:
+  default.conf.tpl: |
+    server {
+        listen       ${POD_IP}:10248;
+
+        location /metrics {
+            proxy_pass http://127.0.0.1:10249;
+        }
+    }
+
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: kube-proxy-wrapper
+  namespace: kube-system
+  labels:
+    k8s-app: kube-proxy-wrapper
+spec:
+  selector:
+    matchLabels:
+      k8s-app: kube-proxy-wrapper
+  template:
+    metadata:
+      labels:
+        k8s-app: kube-proxy-wrapper
+    spec:
+      tolerations:
+      - effect: NoExecute
+        operator: Exists
+      - effect: NoSchedule
+        operator: Exists
+      hostNetwork: true
+      containers:
+      - name: nginx
+        image: nginx:1.17.9
+        command: ["/bin/bash"]
+        args: ["-c", "envsubst < /etc/nginx/conf.d/default.conf.tpl > /etc/nginx/conf.d/default.conf && exec nginx -g 'daemon off;'"]
+        volumeMounts:
+        - name: nginx-conf
+          mountPath: /etc/nginx/conf.d/default.conf.tpl
+          subPath: default.conf.tpl
+          readOnly: true
+        env:
+        - name: POD_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.podIP
+      volumes:
+      - name: nginx-conf
+        configMap:
+          name: kube-proxy-wrapper-config
