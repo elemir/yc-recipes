@@ -2,7 +2,7 @@
 
 ## Установка sysctl-tuner'а
 
-systctl-tuner -- оператор для установки определённых sysctl на ноды. Для его установки в ваш managed кластер в Yandex.Cloud достаточно выполнить `./deploy.sh`. Этот скрипт совершает следующие действия:
+systctl-tuner -- оператор для установки определённых sysctl на ноды. Для его установки в ваш managed кластер в Yandex.Cloud нужно аутентифицироваться в container registry [согласно инструкции](https://cloud.yandex.ru/docs/container-registry/operations/authentication), а затем выполнить `./deploy.sh`. Этот скрипт совершает следующие действия:
 1. Создаёт registry для docker образа с аддоном
 2. Собирает образ и пушит его в registry
 3. Создаёт service-account, namespaces и pod для самого оператора. Кроме того инициализирует ConfigMap, в котором устанавливает `sysctl net.ipv4.tcp_timestamps=0`
