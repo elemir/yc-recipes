@@ -1,0 +1,14 @@
+controller:
+  replicaCount: 2
+  minAvailable: 1
+
+  resources:
+    limits:
+      cpu: 50m
+      memory: 256Mi
+    requests:
+      cpu: 20m
+      memory: 128Mi
+
+  service:
+    type: LoadBalancer
