@@ -29,3 +29,18 @@ ailai9Eithaege4kaelo9beephee6bee
 ```
 
 Подключаемся к http://84.201.158.123 и заходим под пользователем `admin` с паролём `ailai9Eithaege4kaelo9beephee6bee`
+
+## Установка кеширующего прокси trickster
+
+Для того, чтобы снизить нагрузку на prometheus и увеличить скорость отдачи данных, можно поставить кеширующий прокси trickter. В данном примере используется стандартная конфигурация, но в качестве URL prometheus'а используется http://prom-prometheus-operator-prometheus:9090 Кеш хранится в памяти, что позволяет обеспечить наивысшее быстродействие
+
+При использовании multicluster-инсталяции лучше держать trickster в том кластере, что grafana, указывая при этом несколько origin'ов
+
+Устанавливаем trickster, ставим его в тот же namespace, что и prometheus:
+
+```
+$ helm repo add tricksterproxy https://helm.tricksterproxy.io
+$ helm install --namespace prom --name trickster tricksterproxy/trickster -f trickster.yaml
+```
+
+Теперь можно указать http://trickster:8480 в качестве data source в графане
